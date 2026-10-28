@@ -89,7 +89,7 @@ public class RegistrationService {
     public OtpIssuedResponse requestGitHubOtp(GitHubCodeRegistrationRequest request) {
         RegistrationContext context = resolveContext(request.organizationMode(), request.organizationName(),
                 request.organizationId(), request.role(), request.companyAccessCode());
-        ProviderIdentity identity = identityVerifier.verifyGitHubAuthorizationCode(request.code());
+        ProviderIdentity identity = identityVerifier.verifyGitHubAuthorizationCode(request.code(), request.codeVerifier());
         return createSocialChallenge(RegistrationMethod.GITHUB, context, identity);
     }
 

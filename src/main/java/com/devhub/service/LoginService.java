@@ -50,10 +50,10 @@ public class LoginService {
         return tokenService.issue(user);
     }
 
-    public AuthTokenResponse loginWithGitHubCode(String code) {
+    public AuthTokenResponse loginWithGitHubCode(String code, String codeVerifier) {
         ProviderIdentity identity;
         try {
-            identity = identityVerifier.verifyGitHubAuthorizationCode(code);
+            identity = identityVerifier.verifyGitHubAuthorizationCode(code, codeVerifier);
         } catch (IllegalArgumentException ex) {
             throw new AuthException();
         }

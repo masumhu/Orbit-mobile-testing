@@ -38,6 +38,7 @@ public final class RegistrationRequests {
             String organizationId,
             RegistrationRole role,
             @NotBlank String code,
+            @NotBlank @Size(min = 43, max = 128) String codeVerifier,
             String companyAccessCode
     ) { }
 

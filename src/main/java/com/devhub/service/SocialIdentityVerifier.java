@@ -8,19 +8,33 @@ import org.springframework.stereotype.Component;
 import org.springframework.web.client.RestClient;
 import org.springframework.web.client.RestClientException;
 import org.springframework.http.MediaType;
+import org.springframework.security.oauth2.jwt.Jwt;
+import org.springframework.security.oauth2.jwt.JwtDecoder;
+import org.springframework.security.oauth2.jwt.JwtException;
+import org.springframework.security.oauth2.jwt.JwtValidators;
+import org.springframework.security.oauth2.jwt.NimbusJwtDecoder;
 import org.springframework.util.LinkedMultiValueMap;
 import org.springframework.util.MultiValueMap;
 
 import java.util.Map;
 import java.util.List;
+import java.util.Set;
+import java.util.Arrays;
+import java.util.stream.Collectors;
 
 @Component
 public class SocialIdentityVerifier {
     private final RestClient restClient = RestClient.create();
     private final RegistrationProperties properties;
+    private final JwtDecoder googleJwtDecoder;
 
     public SocialIdentityVerifier(RegistrationProperties properties) {
         this.properties = properties;
+        NimbusJwtDecoder decoder = NimbusJwtDecoder
+                .withJwkSetUri("https://www.googleapis.com/oauth2/v3/certs")
+                .build();
+        decoder.setJwtValidator(JwtValidators.createDefault());
+        this.googleJwtDecoder = decoder;
     }
 
     public ProviderIdentity verify(RegistrationMethod method, String token) {
@@ -35,18 +49,22 @@ public class SocialIdentityVerifier {
         }
     }
 
-    public ProviderIdentity verifyGitHubAuthorizationCode(String code) {
+    public ProviderIdentity verifyGitHubAuthorizationCode(String code, String codeVerifier) {
         if (properties.githubClientId() == null || properties.githubClientId().isBlank()
                 || properties.githubClientSecret() == null || properties.githubClientSecret().isBlank()) {
             throw new IllegalStateException("GitHub sign-in is not configured");
         }
         if (code == null || code.isBlank()) throw new IllegalArgumentException("GitHub authorization code is required");
+        if (codeVerifier == null || codeVerifier.length() < 43 || codeVerifier.length() > 128) {
+            throw new IllegalArgumentException("GitHub PKCE code verifier must contain 43 to 128 characters");
+        }
         try {
             MultiValueMap<String, String> form = new LinkedMultiValueMap<>();
             form.add("client_id", properties.githubClientId());
             form.add("client_secret", properties.githubClientSecret());
             form.add("code", code);
             form.add("redirect_uri", properties.githubRedirectUri());
+            form.add("code_verifier", codeVerifier);
             Map<?, ?> tokenResponse = restClient.post()
                     .uri("https://github.com/login/oauth/access_token")
                     .contentType(MediaType.APPLICATION_FORM_URLENCODED)
@@ -92,16 +110,43 @@ public class SocialIdentityVerifier {
     }
 
     private ProviderIdentity verifyGoogle(String idToken) {
-        if (properties.googleClientId() == null || properties.googleClientId().isBlank()) {
+        Set<String> audiences = googleClientAudiences();
+        if (audiences.isEmpty()) {
             throw new IllegalStateException("Google sign-in is not configured");
         }
-        Map<?, ?> claims = restClient.get()
-                .uri("https://oauth2.googleapis.com/tokeninfo?id_token={token}", idToken)
-                .retrieve().body(Map.class);
-        if (claims == null || !properties.googleClientId().equals(claims.get("aud")) || !"true".equals(String.valueOf(claims.get("email_verified")))) {
+        if (idToken == null || idToken.isBlank()) {
+            throw new IllegalArgumentException("Google identity token is required");
+        }
+
+        final Jwt jwt;
+        try {
+            jwt = googleJwtDecoder.decode(idToken);
+        } catch (JwtException ex) {
+            throw new IllegalArgumentException("Google identity token is invalid or expired", ex);
+        }
+
+        String issuer = String.valueOf(jwt.getClaims().get("iss"));
+        boolean trustedIssuer = issuer.equals("accounts.google.com")
+                || issuer.equals("https://accounts.google.com");
+        boolean trustedAudience = jwt.getAudience().stream().anyMatch(audiences::contains);
+        Object emailVerified = jwt.getClaims().get("email_verified");
+        boolean verifiedEmail = Boolean.TRUE.equals(emailVerified)
+                || "true".equalsIgnoreCase(String.valueOf(emailVerified));
+        if (!trustedIssuer || !trustedAudience || !verifiedEmail) {
             throw new IllegalArgumentException("Google identity token is invalid or email is not verified");
         }
-        return verifiedIdentity(claims.get("sub"), claims.get("email"), valueOrEmpty(claims.get("name")));
+        return verifiedIdentity(jwt.getSubject(), jwt.getClaims().get("email"),
+                valueOrEmpty(jwt.getClaims().get("name")));
+    }
+
+    private Set<String> googleClientAudiences() {
+        String configuredIds = properties.googleClientIds();
+        if (configuredIds == null || configuredIds.isBlank()) configuredIds = properties.googleClientId();
+        if (configuredIds == null || configuredIds.isBlank()) return Set.of();
+        return Arrays.stream(configuredIds.split(","))
+                .map(String::trim)
+                .filter(value -> !value.isEmpty())
+                .collect(Collectors.toUnmodifiableSet());
     }
 
     private ProviderIdentity verifyGitHub(String accessToken) {

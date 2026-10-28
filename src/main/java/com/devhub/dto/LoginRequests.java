@@ -1,13 +1,17 @@
 package com.devhub.dto;
 
 import jakarta.validation.constraints.NotBlank;
+import jakarta.validation.constraints.Size;
 
 public final class LoginRequests {
     private LoginRequests() { }
 
     public record PasswordLoginRequest(@NotBlank String identifier, @NotBlank String password) { }
     public record SocialLoginRequest(@NotBlank String providerToken) { }
-    public record GitHubCodeLoginRequest(@NotBlank String code) { }
+    public record GitHubCodeLoginRequest(
+            @NotBlank String code,
+            @NotBlank @Size(min = 43, max = 128) String codeVerifier
+    ) { }
     public record GoogleCodeLoginRequest(@NotBlank String code) { }
     public record RefreshRequest(@NotBlank String refreshToken) { }
 }

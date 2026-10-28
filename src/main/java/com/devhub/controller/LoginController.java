@@ -37,7 +37,7 @@ public class LoginController {
 
     @PostMapping("/login/github/callback")
     public AuthTokenResponse githubCallback(@Valid @RequestBody LoginRequests.GitHubCodeLoginRequest request) {
-        return loginService.loginWithGitHubCode(request.code());
+        return loginService.loginWithGitHubCode(request.code(), request.codeVerifier());
     }
 
     @PostMapping("/login/google/callback")
